@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Cache & Service Workers</title>
+</head>
+<body>
+    <h1>Cache & Service Worker Cleaner</h1>
+    <p>Open this file in your browser and click the button below to clear everything.</p>
+    <button onclick="clearEverything()">Clear All Cache & Service Workers</button>
+    <pre id="output"></pre>
+    
+    <script>
+        async function clearEverything() {
+            const output = document.getElementById('output');
+            output.textContent = 'Clearing...\n';
+            
+            // 1. Unregister all service workers
+            if ('serviceWorker' in navigator) {
+                try {
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    output.textContent += `Found ${registrations.length} service worker(s)\n`;
+                    
+                    for (let registration of registrations) {
+                        const success = await registration.unregister();
+                        output.textContent += `Unregistered: ${registration.scope} - ${success ? 'SUCCESS' : 'FAILED'}\n`;
+                    }
+                } catch (err) {
+                    output.textContent += `Error unregistering service workers: ${err.message}\n`;
+                }
+            }
+            
+            // 2. Clear all caches
+            if ('caches' in window) {
+                try {
+                    const cacheNames = await caches.keys();
+                    output.textContent += `Found ${cacheNames.length} cache(s)\n`;
+                    
+                    for (let cacheName of cacheNames) {
+                        const deleted = await caches.delete(cacheName);
+                        output.textContent += `Deleted cache: ${cacheName} - ${deleted ? 'SUCCESS' : 'FAILED'}\n`;
+                    }
+                } catch (err) {
+                    output.textContent += `Error deleting caches: ${err.message}\n`;
+                }
+            }
+            
+            // 3. Clear localStorage
+            try {
+                localStorage.clear();
+                output.textContent += `Cleared localStorage\n`;
+            } catch (err) {
+                output.textContent += `Error clearing localStorage: ${err.message}\n`;
+            }
+            
+            // 4. Clear sessionStorage
+            try {
+                sessionStorage.clear();
+                output.textContent += `Cleared sessionStorage\n`;
+            } catch (err) {
+                output.textContent += `Error clearing sessionStorage: ${err.message}\n`;
+            }
+            
+            output.textContent += '\n✅ DONE! Now:\n';
+            output.textContent += '1. Close this tab\n';
+            output.textContent += '2. Close your browser completely\n';
+            output.textContent += '3. Reopen browser\n';
+            output.textContent += '4. Go to http://localhost:3000\n';
+            output.textContent += '5. Press Ctrl+Shift+R to hard refresh\n';
+        }
+    </script>
+</body>
+</html>

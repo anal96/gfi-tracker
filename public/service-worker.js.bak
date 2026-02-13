@@ -1,0 +1,87 @@
+// Production Service Worker for PWA Install Prompt
+const CACHE_NAME = 'gfi-tracker-v1';
+const urlsToCache = [
+  '/',
+  '/manifest.json',
+  '/index.html'
+];
+
+// Install Service Worker
+self.addEventListener('install', (event) => {
+  console.log('[Service Worker] Installing...');
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => {
+        console.log('[Service Worker] Caching app shell');
+        return cache.addAll(urlsToCache).catch((err) => {
+          console.log('[Service Worker] Cache addAll failed (this is OK):', err);
+        });
+      })
+      .then(() => {
+        console.log('[Service Worker] Skip waiting');
+        return self.skipWaiting();
+      })
+  );
+});
+
+// Activate Service Worker
+self.addEventListener('activate', (event) => {
+  console.log('[Service Worker] Activating...');
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE_NAME) {
+            console.log('[Service Worker] Deleting old cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => {
+      console.log('[Service Worker] Claiming clients');
+      return self.clients.claim();
+    })
+  );
+});
+
+// Fetch event - Network first strategy for better performance
+self.addEventListener('fetch', (event) => {
+  // Don't cache API calls - let them pass through
+  if (event.request.url.includes('/api/')) {
+    return;
+  }
+
+  // Network first, fallback to cache
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        // Clone the response for caching
+        const responseToCache = response.clone();
+        
+        // Only cache GET requests
+        if (event.request.method === 'GET') {
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        
+        return response;
+      })
+      .catch(() => {
+        // If network fails, try cache
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          // If no cache, return a basic offline page or error
+          return new Response('Offline - Please check your connection', {
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: new Headers({
+              'Content-Type': 'text/plain'
+            })
+          });
+        });
+      })
+  );
+});
