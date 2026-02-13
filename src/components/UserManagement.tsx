@@ -41,9 +41,33 @@ export function UserManagement({ user, isDarkMode = false }: UserManagementProps
     const [modalError, setModalError] = useState<string | null>(null);
     const [showPassword, setShowPassword] = useState(false);
 
+    const [allowedBatchIds, setAllowedBatchIds] = useState<string[] | undefined>([]);
+
     useEffect(() => {
         loadUsers();
     }, []);
+
+    // Load allowed batches for teacher
+    useEffect(() => {
+        const loadAllowedBatches = async () => {
+            if (user?.role === 'teacher') {
+                try {
+                    const response = await api.getTeacherDashboard();
+                    if (response.success && response.data?.subjects) {
+                        const subjects = response.data.subjects;
+                        const batchIds = subjects
+                            .map((s: any) => s.batch?.id)
+                            .filter((id: string) => id);
+                        const uniqueBatchIds = [...new Set(batchIds)];
+                        setAllowedBatchIds(uniqueBatchIds as string[]);
+                    }
+                } catch (err) {
+                    console.error('Error loading allowed batches:', err);
+                }
+            }
+        };
+        loadAllowedBatches();
+    }, [user]);
 
     const loadUsers = async () => {
         try {
@@ -280,6 +304,7 @@ export function UserManagement({ user, isDarkMode = false }: UserManagementProps
                 selectedBatch={selectedBatch}
                 onBatchChange={(id) => setSelectedBatch(id)}
                 user={user}
+                allowedBatchIds={user?.role === 'teacher' ? allowedBatchIds : undefined}
             />
 
             {/* Add/Edit User Modal */}

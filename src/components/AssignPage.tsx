@@ -39,6 +39,30 @@ export function AssignPage({ user, isDarkMode = false }: AssignPageProps) {
   const [selectedBatchName, setSelectedBatchName] = useState<string | null>(null);
   const [activeUnitIndex, setActiveUnitIndex] = useState(0);
 
+  const [allowedBatchIds, setAllowedBatchIds] = useState<string[] | undefined>([]);
+
+  // Load allowed batches for teacher
+  useEffect(() => {
+    const loadAllowedBatches = async () => {
+      if (user?.role === 'teacher') {
+        try {
+          const response = await api.getTeacherDashboard();
+          if (response.success && response.data?.subjects) {
+            const subjects = response.data.subjects;
+            const batchIds = subjects
+              .map((s: any) => s.batch?.id)
+              .filter((id: string) => id);
+            const uniqueBatchIds = [...new Set(batchIds)];
+            setAllowedBatchIds(uniqueBatchIds as string[]);
+          }
+        } catch (err) {
+          console.error('Error loading allowed batches:', err);
+        }
+      }
+    };
+    loadAllowedBatches();
+  }, [user]);
+
   // Load dashboard data
   useEffect(() => {
     // Don't load if user is a verifier (they should use VerifierDashboard)
@@ -225,6 +249,7 @@ export function AssignPage({ user, isDarkMode = false }: AssignPageProps) {
           selectedBatch={selectedBatch}
           onBatchChange={setSelectedBatch}
           user={user}
+          allowedBatchIds={user?.role === 'teacher' ? allowedBatchIds : undefined}
         />
       </motion.div>
 

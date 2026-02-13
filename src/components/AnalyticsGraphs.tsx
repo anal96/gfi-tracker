@@ -166,45 +166,47 @@ export function AnalyticsGraphs({ data, mode = 'subject' }: AnalyticsGraphsProps
                     </div>
                 </div>
 
-                <div className="h-[300px] w-full">
+                <div className="w-full" style={{ height: Math.max(300, data.length * 60) }}>
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                             layout="vertical"
                             data={data}
-                            margin={{ top: 0, right: 10, left: 0, bottom: 0 }}
-                            barSize={8}
+                            margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                            barSize={12}
+                            barGap={-12}
                         >
-                            <XAxis type="number" hide />
+                            <XAxis type="number" hide domain={[0, 'dataMax']} />
                             <YAxis
                                 dataKey="name"
                                 type="category"
-                                width={90}
-                                tick={{ fill: '#e2e8f0', fontSize: 11, fontWeight: 500 }}
+                                width={120}
+                                interval={0}
+                                tick={{ fill: '#e2e8f0', fontSize: 12, fontWeight: 500 }}
                                 tickLine={false}
                                 axisLine={false}
                             />
 
 
                             {/* Background Track */}
-                            <Bar dataKey="total" stackId="bg" fill="#1e293b" radius={[4, 4, 4, 4]} isAnimationActive={false} />
+                            <Bar dataKey="total" stackId="bg" fill="#1e293b" radius={[6, 6, 6, 6]} isAnimationActive={false} />
 
                             {/* Actual Data */}
                             <Bar dataKey="completed" name="Completed" stackId="a" fill={COLORS.completed} radius={[0, 0, 0, 0]} />
                             <Bar dataKey="inProgress" name="On Track" stackId="a" fill={COLORS.inProgress} />
-                            <Bar dataKey="delayed" name="Delayed (>12h)" stackId="a" fill={COLORS.delayed} radius={[0, 4, 4, 0]} />
+                            <Bar dataKey="delayed" name="Delayed (>12h)" stackId="a" fill={COLORS.delayed} radius={[0, 6, 6, 0]} />
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
 
-                <div className="mt-3 flex flex-wrap justify-center gap-3 text-[10px] text-slate-400 text-center px-4">
-                    <span className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Completed
+                <div className="mt-4 flex flex-wrap justify-center gap-4 text-[11px] text-slate-400 font-medium px-4">
+                    <span className="flex items-center gap-2 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" /> Completed
                     </span>
-                    <span className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" /> On Track
+                    <span className="flex items-center gap-2 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50">
+                        <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" /> On Track
                     </span>
-                    <span className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Delayed
+                    <span className="flex items-center gap-2 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50">
+                        <div className="w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" /> Delayed
                     </span>
                 </div>
             </motion.div>

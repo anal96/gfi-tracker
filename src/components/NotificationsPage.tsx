@@ -390,17 +390,9 @@ export function NotificationsPage({ user, onBack, isDarkMode = false }: Notifica
             {/* Verifier Type Filters */}
             {user?.role === 'verifier' && (
               <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
+
                 <button
-                  onClick={() => setTypeFilter('all')}
-                  className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-colors ${typeFilter === 'all'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'
-                    }`}
-                >
-                  All
-                </button>
-                <button
-                  onClick={() => setTypeFilter('time-slot')}
+                  onClick={() => setTypeFilter(typeFilter === 'time-slot' ? 'all' : 'time-slot')}
                   className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-colors ${typeFilter === 'time-slot'
                     ? 'bg-blue-600 text-white shadow-md'
                     : 'bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'
@@ -409,7 +401,7 @@ export function NotificationsPage({ user, onBack, isDarkMode = false }: Notifica
                   Time Slot / Break
                 </button>
                 <button
-                  onClick={() => setTypeFilter('unit-start')}
+                  onClick={() => setTypeFilter(typeFilter === 'unit-start' ? 'all' : 'unit-start')}
                   className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-colors ${typeFilter === 'unit-start'
                     ? 'bg-blue-600 text-white shadow-md'
                     : 'bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'
@@ -418,7 +410,7 @@ export function NotificationsPage({ user, onBack, isDarkMode = false }: Notifica
                   Unit Start
                 </button>
                 <button
-                  onClick={() => setTypeFilter('unit-complete')}
+                  onClick={() => setTypeFilter(typeFilter === 'unit-complete' ? 'all' : 'unit-complete')}
                   className={`px-4 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-colors ${typeFilter === 'unit-complete'
                     ? 'bg-blue-600 text-white shadow-md'
                     : 'bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700'
