@@ -10,6 +10,7 @@ import Unit from '../models/Unit.js';
 import SubjectAssignment from '../models/SubjectAssignment.js';
 import Batch from '../models/Batch.js';
 import ExamStatus from '../models/ExamStatus.js';
+import TimeTableHistory from '../models/TimeTableHistory.js';
 
 const router = express.Router();
 
@@ -91,6 +92,7 @@ router.get('/dashboard', async (req, res) => {
 
         return {
           id: log._id.toString(),
+          teacherId: log.teacher?._id?.toString() || '',
           teacherName: log.teacher?.name || 'Unknown Teacher',
           teacherEmail: log.teacher?.email || 'N/A',
           subject: log.subject?.name || 'Unknown Subject',
@@ -1635,9 +1637,13 @@ router.post('/time-table/apply', async (req, res) => {
 
       const teacher = await User.findOne({ email: teacherEmail.trim(), role: 'teacher' });
       if (!teacher) {
+        console.log(`Debug: Teacher not found for email '${teacherEmail}'`);
         results.errors.push({ entry, message: `Teacher not found: ${teacherEmail}` });
         continue;
       }
+      // Enrich entry with resolved details for history
+      entry.resolvedTeacherName = teacher.name;
+      entry.resolvedTeacherEmail = teacher.email;
 
       const targetDate = new Date(date);
       if (isNaN(targetDate.getTime())) {
@@ -1710,10 +1716,81 @@ router.post('/time-table/apply', async (req, res) => {
       results.applied += 1;
     }
 
+    if (results.applied === 0 && results.errors.length === 0) {
+      results.errors.push({ message: 'No entries processed. Check if emails match teachers exactly.' });
+    }
+
     res.json({
       success: true,
       applied: results.applied,
       errors: results.errors.length ? results.errors : undefined
+    });
+
+    // Save history if applied successfully
+    if (results.applied > 0) {
+      const teacherEmails = [...new Set(entries.map(e => e.resolvedTeacherEmail || e.teacherEmail).filter(Boolean))];
+      const teacherNames = [...new Set(entries.map(e => e.resolvedTeacherName || e.teacherName).filter(Boolean))];
+      const batchNames = [...new Set(entries.map(e => e.batch).filter(Boolean))];
+      await TimeTableHistory.create({
+        verifier: req.user.id,
+        entries: entries, // Now contains resolved details
+        teacherEmails,
+        teacherNames,
+        batchNames
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// @route   GET /api/verifier/time-table/history
+// @desc    Get uploaded time table history
+// @access  Private/Verifier
+router.get('/time-table/history', async (req, res) => {
+  try {
+    const history = await TimeTableHistory.find({ verifier: req.user.id })
+      .select('createdAt teacherEmails teacherNames batchNames entries') // Include entries for re-download
+      .sort({ createdAt: -1 })
+      .limit(50); // Limit to last 50 uploads
+
+    res.json({
+      success: true,
+      data: history
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// @route   DELETE /api/verifier/time-table/history/:id
+// @desc    Delete a time table history record
+// @access  Private/Verifier
+router.delete('/time-table/history/:id', async (req, res) => {
+  try {
+    const history = await TimeTableHistory.findOne({
+      _id: req.params.id,
+      verifier: req.user.id
+    });
+
+    if (!history) {
+      return res.status(404).json({
+        success: false,
+        message: 'History record not found'
+      });
+    }
+
+    await history.deleteOne();
+
+    res.json({
+      success: true,
+      message: 'History record deleted'
     });
   } catch (error) {
     res.status(500).json({

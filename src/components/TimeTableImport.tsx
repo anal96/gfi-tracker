@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Upload, Download, CheckCircle2, AlertCircle, FileSpreadsheet, Send, Loader2 } from 'lucide-react';
+import { Upload, Download, AlertCircle, FileSpreadsheet, Send, Loader2, History, X, Trash2, CheckCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 import api from '../services/api';
@@ -24,6 +24,8 @@ export interface TimeTableEntry {
   timeDisplay?: string;
   batch?: string;
   subject?: string;
+  resolvedTeacherName?: string;
+  resolvedTeacherEmail?: string;
 }
 
 function validateHeaders(headerRow: string[]): string[] {
@@ -132,7 +134,75 @@ export function TimeTableImport() {
   const [applyLoading, setApplyLoading] = useState(false);
   const [applyResult, setApplyResult] = useState<{ applied: number; errors?: Array<{ entry: any; message: string }> } | null>(null);
 
+  // History State
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+
+  const fetchHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const response = await api.getTimeTableHistory();
+      if (response && response.success) {
+        setHistoryData(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to load history', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleDeleteHistory = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this history record? This will NOT remove the actual time table slots from calendars, only this upload log.')) {
+      return;
+    }
+
+    try {
+      await api.deleteTimeTableHistory(id);
+      setHistoryData(prev => prev.filter(item => item._id !== id));
+    } catch (err) {
+      console.error('Failed to delete history', err);
+      alert('Failed to delete history record');
+    }
+  };
+
+  const handleDownloadHistory = (item: any) => {
+    try {
+      if (!item.entries || item.entries.length === 0) return;
+
+      const exportData = item.entries.map((e: any) => {
+        let dayStr = e.day || '';
+        if (!dayStr && e.date) {
+          try { dayStr = new Date(e.date).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase(); } catch (err) { }
+        }
+
+        return {
+          'DATE': e.date,
+          'DAY': dayStr,
+          'BATCH': e.batch || '',
+          'SUBJECT': e.subject || e.subjectName || '',
+          'FACULTY': e.teacherName || e.resolvedTeacherName || e.teacherEmail || '',
+          'SENT TO': e.resolvedTeacherName || e.teacherName || '',
+          'EMAIL': e.teacherEmail || '',
+          'TIME': e.timeDisplay || (e.slotIds && e.slotIds.length > 0 ? `${e.slotIds.length} slots` : '')
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(exportData, { header: CLASS_SCHEDULE_HEADERS });
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Sent Time Table');
+      const dateStr = new Date(item.createdAt).toISOString().split('T')[0];
+      XLSX.writeFile(wb, `Sent_TimeTable_${dateStr}.xlsx`);
+    } catch (err) {
+      console.error('Download failed', err);
+      alert('Failed to generate Excel file');
+    }
+  };
+
   // When entries change: run format validation, then fetch teachers/subjects/batches and validate existence
+  // Also resolve teacher details if missing (e.g. name based on email, or email based on name)
   useEffect(() => {
     if (entries.length === 0) {
       setValidationErrors([]);
@@ -150,12 +220,55 @@ export function TimeTableImport() {
           api.getBatches()
         ]);
         if (cancelled) return;
+
         const teachers: RefData['teachers'] = (teachersRes?.data ?? teachersRes) ?? [];
         const subjects: RefData['subjects'] = (subjectsRes?.data ?? subjectsRes) ?? [];
         const batches: RefData['batches'] = (batchesRes?.data ?? batchesRes) ?? [];
         const ref: RefData = { teachers, subjects, batches };
+
+        // Resolve teacher details in entries
+        const resolvedEntries = entries.map(entry => {
+          let resolved = { ...entry };
+          const email = (entry.teacherEmail || '').trim().toLowerCase();
+          const faculty = (entry.teacherName || '').trim();
+
+          if (email) {
+            const match = teachers.find(t => (t.teacherEmail || '').trim().toLowerCase() === email);
+            if (match) {
+              resolved.teacherName = match.teacherName || resolved.teacherName;
+              resolved.resolvedTeacherName = match.teacherName;
+              resolved.resolvedTeacherEmail = match.teacherEmail;
+            }
+          } else if (faculty) {
+            const match = teachers.find(t => {
+              const n = (t.teacherName || '').trim();
+              return n.toLowerCase() === faculty.toLowerCase() ||
+                n.toLowerCase().includes(faculty.toLowerCase()) ||
+                faculty.toLowerCase().includes(n.toLowerCase());
+            });
+            if (match) {
+              resolved.teacherEmail = match.teacherEmail || resolved.teacherEmail;
+              resolved.resolvedTeacherName = match.teacherName;
+              resolved.resolvedTeacherEmail = match.teacherEmail;
+            }
+          }
+          return resolved;
+        });
+
+        // Only update entries if resolution changed something to avoid infinite loop
+        const hasChanges = JSON.stringify(resolvedEntries) !== JSON.stringify(entries);
+        if (hasChanges) {
+          setEntries(resolvedEntries);
+          // Verify one more time with resolved data in next render cycle or continue validation on resolved data?
+          // To prevent double render/validation loop, we continue validation on `resolvedEntries` locally
+          // but `setEntries` will trigger effect again. To avoid loop, we check equality.
+        }
+
         const existenceErrors: ValidationError[] = [];
-        entries.forEach((e, i) => {
+        // Validate using the (potentially) resolved entries
+        const targetEntries = hasChanges ? resolvedEntries : entries;
+
+        targetEntries.forEach((e, i) => {
           existenceErrors.push(...validateRowAgainstRef(e, i, ref));
         });
         setValidationErrors([...formatErrors, ...existenceErrors]);
@@ -288,22 +401,56 @@ export function TimeTableImport() {
         const emailIdx = header.findIndex(h => h === 'email' || h === 'teacher email');
 
         const parsed: TimeTableEntry[] = [];
+
+        // Helper variables for merged cells
+        let lastDate = '';
+        let lastDay = '';
+        let lastBatch = '';
+        let lastSubject = '';
+        let lastTimeStr = '';
+        let lastFaculty = '';
+        let lastEmail = '';
+
+
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
           if (!Array.isArray(row)) continue;
+
           const firstCell = String(row[0] ?? '').trim().toUpperCase();
           if (firstCell === 'BREAK') continue;
-          const date = parseDateCell(row[dateIdx]);
-          const timeStr = String(row[timeIdx] ?? '').trim();
-          const faculty = String(row[facultyIdx] ?? '').trim();
-          const day = dayIdx >= 0 ? String(row[dayIdx] ?? '').trim() : '';
-          const batch = batchIdx >= 0 ? String(row[batchIdx] ?? '').trim() : '';
-          const subject = subjectIdx >= 0 ? String(row[subjectIdx] ?? '').trim() : '';
-          const email = emailIdx >= 0 ? String(row[emailIdx] ?? '').trim() : '';
+
+          // Extract current row values
+          let date = parseDateCell(row[dateIdx]);
+          let timeStr = String(row[timeIdx] ?? '').trim();
+          let faculty = String(row[facultyIdx] ?? '').trim();
+          let day = dayIdx >= 0 ? String(row[dayIdx] ?? '').trim() : '';
+          let batch = batchIdx >= 0 ? String(row[batchIdx] ?? '').trim() : '';
+          let subject = subjectIdx >= 0 ? String(row[subjectIdx] ?? '').trim() : '';
+          let email = emailIdx >= 0 ? String(row[emailIdx] ?? '').trim() : '';
+
+          // Handle merged cells logic (carry over from previous if empty)
+          if (date) lastDate = date; else date = lastDate;
+          if (day) lastDay = day; else day = lastDay;
+          if (batch) lastBatch = batch; else batch = lastBatch; // Key fix for missing Batch
+          if (subject) lastSubject = subject; else subject = lastSubject; // Key fix for missing Subject
+
+          // Time/Faculty/Email are usually row-specific but sometimes merged differently
+          // If time is present, it's a new slot. We do NOT carry over time because merged time cells (e.g. "9-12") 
+          // are processed fully in the first row. Carrying it over would duplicate the 3-hour block for every underlying empty row.
+
+          // Faculty/Email carry over only if it looks like a merged block (e.g. same subject/time)
+          // But actually, simpler approach: if the cell is literally empty, take previous. 
+          // Warning: This assumes the empty cell MEANS "same as above".
+          if (faculty) lastFaculty = faculty; else faculty = lastFaculty;
+          if (email) lastEmail = email; else email = lastEmail;
+
+
           if (!date || !faculty) continue;
           if (!timeStr || /CELEBRATION|WEEK OFF|OFF/i.test(faculty)) continue;
+
           const slotIds = parseTimeRangeToSlots(timeStr);
           if (slotIds.length === 0) continue;
+
           parsed.push({
             teacherName: faculty,
             teacherEmail: email,
@@ -372,11 +519,14 @@ export function TimeTableImport() {
       }
       const payload = resolvedEntries.map(e => ({
         teacherEmail: e.teacherEmail,
+        teacherName: e.teacherName,
         date: e.date,
+        day: e.day,
         slotIds: e.slotIds,
         breakMinutes: e.breakMinutes ?? undefined,
         subjectName: e.subject ?? undefined,
-        batch: e.batch ?? undefined
+        batch: e.batch ?? undefined,
+        timeDisplay: e.timeDisplay
       }));
       const response = await api.applyTimeTableFromImport(payload);
       if (response && response.success) {
@@ -394,12 +544,93 @@ export function TimeTableImport() {
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-      <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-semibold text-black dark:text-white mb-1">Import Time Table from Excel</h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Use the template (DATE, DAY, BATCH, SUBJECT, FACULTY, EMAIL, TIME). Fill each teacher&apos;s login email so their timetable is added to their calendar.
-        </p>
+      <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+        <div>
+          <h3 className="text-lg font-semibold text-black dark:text-white mb-1">Import Time Table from Excel</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Use the template (DATE, DAY, BATCH, SUBJECT, FACULTY, EMAIL, TIME). Fill each teacher&apos;s login email so their timetable is added to their calendar.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setShowHistory(!showHistory);
+            if (!showHistory) fetchHistory();
+          }}
+          className={`p-2 rounded-lg transition-colors ${showHistory ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30' : 'hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-600 dark:text-gray-300'}`}
+          title="View Sent History"
+        >
+          <History className="w-5 h-5" />
+        </button>
       </div>
+
+      {showHistory && (
+        <div className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-slate-800/50 p-4 max-h-80 overflow-y-auto">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <History className="w-4 h-4" />
+              Sent History
+            </h4>
+            <button onClick={() => setShowHistory(false)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {loadingHistory ? (
+            <div className="flex justify-center p-4">
+              <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+            </div>
+          ) : historyData.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-4">No history found.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-gray-500 uppercase bg-gray-100 dark:bg-gray-700 dark:text-gray-400 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-2 rounded-tl-lg">Date</th>
+
+                    <th className="px-4 py-2 rounded-tr-lg text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {historyData.map((item: any) => (
+                    <>
+                      <tr key={item._id} className="bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white whitespace-nowrap">
+                          {new Date(item.createdAt).toLocaleDateString()}
+                          <div className="text-xs text-gray-500 dark:text-gray-400 font-normal">
+                            {new Date(item.createdAt).toLocaleTimeString()}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-right flex items-center justify-end gap-2">
+
+                          <button
+                            onClick={() => handleDownloadHistory(item)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 dark:text-blue-400 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 rounded-lg transition-colors border border-blue-200 dark:border-blue-800"
+                            title="Download Excel"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                            Excel
+                          </button>
+                          <button
+                            onClick={() => handleDeleteHistory(item._id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 dark:text-red-400 dark:bg-red-900/20 dark:hover:bg-red-900/30 rounded-lg transition-colors border border-red-200 dark:border-red-800"
+                            title="Delete History Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+
+                    </>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="p-6 space-y-6">
         <div className="flex flex-wrap gap-3">
@@ -515,17 +746,35 @@ export function TimeTableImport() {
           <div className={`p-4 rounded-xl border ${applyResult.applied > 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'}`}>
             {applyResult.applied > 0 && (
               <p className="flex items-center gap-2 text-emerald-800 dark:text-emerald-200 font-medium">
-                <CheckCircle2 className="w-5 h-5" />
+                <CheckCircle className="w-5 h-5" />
                 Applied time table for {applyResult.applied} day(s). Entries are now on each teacher&apos;s calendar.
               </p>
             )}
-            {applyResult.errors && applyResult.errors.length > 0 && (
-              <ul className="mt-2 text-sm text-red-700 dark:text-red-300 list-disc list-inside">
-                {applyResult.errors.map((err, i) => (
-                  <li key={i}>{err.message}</li>
-                ))}
-              </ul>
-            )}
+            {applyResult.errors && applyResult.errors.length > 0 ? (
+              <div className="mt-3">
+                <p className="font-semibold text-red-800 dark:text-red-200 mb-2 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4" />
+                  {applyResult.errors.length} Issue{applyResult.errors.length !== 1 ? 's' : ''} Found:
+                </p>
+                <div className="max-h-60 overflow-y-auto bg-white/50 dark:bg-black/20 rounded-lg p-3 border border-red-100 dark:border-red-800/50">
+                  <ul className="space-y-1.5 text-sm text-red-700 dark:text-red-300 list-disc pl-4">
+                    {applyResult.errors.map((err, i) => (
+                      <li key={i} className="break-words leading-relaxed">
+                        {err.message || 'Unknown error occurred'}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : (applyResult.applied === 0 && (
+              <div className="mt-3 bg-red-100 dark:bg-red-900/30 p-3 rounded-lg border border-red-200 dark:border-red-800">
+                <p className="flex items-center gap-2 text-sm text-red-800 dark:text-red-200 font-bold">
+                  <AlertCircle className="w-5 h-5" />
+                  Submission Failed
+                </p>
+
+              </div>
+            ))}
           </div>
         )}
 

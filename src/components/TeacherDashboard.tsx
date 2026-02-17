@@ -82,7 +82,9 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorModalMessage, setErrorModalMessage] = useState('');
   const [pendingNotificationsCount, setPendingNotificationsCount] = useState(0);
+  const [prevDayMissing, setPrevDayMissing] = useState(false);
   const [activeUnitIndex, setActiveUnitIndex] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(new Date());
 
   // Debug: Log modal state changes
   useEffect(() => {
@@ -97,7 +99,7 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
     }
     loadDashboardData();
     loadNotificationsCount();
-  }, [user]);
+  }, [user, selectedDate]); // Reload when date changes
 
   // Load notifications count
   const loadNotificationsCount = async () => {
@@ -130,9 +132,17 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
     try {
       if (!subjects.length) setLoading(true);
       setError(null);
-      const response = await api.getTeacherDashboard();
+      // Pass selectedDate to API
+      const response = await api.getTeacherDashboard(null, selectedDate);
 
       if (response.success && response.data) {
+        // Set prevDayMissing state
+        if (response.data.prevDayMissing) {
+          setPrevDayMissing(true);
+        } else {
+          setPrevDayMissing(false);
+        }
+
         setSubjects(response.data.subjects || []);
 
         // Set selected time slots - ONLY show approved slots
@@ -216,6 +226,16 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
     }
   };
 
+  const goToPreviousDay = () => {
+    const prevDay = new Date(selectedDate);
+    prevDay.setDate(prevDay.getDate() - 1);
+    setSelectedDate(prevDay);
+  };
+
+  const goToToday = () => {
+    setSelectedDate(new Date());
+  };
+
   // Find ALL active units from all subjects
   const activeUnits = subjects
     .flatMap(s => s.units
@@ -224,7 +244,8 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
         ...u,
         subjectName: s.name,
         subjectColor: s.color,
-        subjectId: s.id
+        subjectId: s.id,
+        batchName: s.batch?.name
       }))
     )
     .sort((a, b) => {
@@ -345,7 +366,7 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
       let currentSavedSlots: string[] = [];
       try {
         console.log('📡 Fetching current state from backend...');
-        const dashboardResponse = await api.getTeacherDashboard();
+        const dashboardResponse = await api.getTeacherDashboard(null, selectedDate);
         if (dashboardResponse.success && dashboardResponse.data?.timeSlots?.slots) {
           // Get ALL checked slots from backend
           const allCheckedSlots = dashboardResponse.data.timeSlots.slots
@@ -357,7 +378,7 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
 
 
           try {
-            const approvalResponse = await api.getTimeSlotApprovalStatus();
+            const approvalResponse = await api.getTimeSlotApprovalStatus(selectedDate);
             if (approvalResponse && approvalResponse.success) {
               const approvalStatus = approvalResponse.data;
               console.log('📊 Approval status:', approvalStatus);
@@ -477,7 +498,7 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
       for (const { slotId, checked } of changedSlots) {
         try {
           console.log(`📤 Updating slot ${slotId} to checked=${checked}`);
-          const result = await api.updateTimeSlot(slotId, checked);
+          const result = await api.updateTimeSlot(slotId, checked, null, selectedDate);
           console.log(`✅ Slot ${slotId} updated:`, {
             success: result?.success,
             message: result?.message,
@@ -589,6 +610,8 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
       </div>
     );
   }
+
+
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 xl:px-8 pb-32 sm:pb-36 pt-4 sm:pt-6">
@@ -743,21 +766,54 @@ export function TeacherDashboard({ user, isDarkMode = false, onNavigate }: Teach
         }
       </AnimatePresence >
 
+      {/* Date Navigation Banner (if viewing past date) */}
+      {selectedDate.toDateString() !== new Date().toDateString() && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 p-4 mb-6 rounded-r-lg flex items-center justify-between"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 dark:bg-blue-800 rounded-full">
+              <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-300" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                Viewing schedule for {selectedDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              </p>
+              <p className="text-xs text-blue-600 dark:text-blue-300 mt-0.5">
+                You are editing a past record.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={goToToday}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+          >
+            Back to Today
+          </button>
+        </motion.div>
+      )}
+
       {/* Time Slot Section - Modern Mobile Card */}
-      < motion.div
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
         className="mb-6"
       >
         <TimeSlotSelector
+          key={selectedDate.toISOString()} // Force remount when date changes to reset internal state
           selectedSlots={selectedSlots}
           onSelectionChange={handleTimeSlotChange}
           onSave={handleTimeSlotSave}
           breakDuration={breakDuration}
           approvedHours={approvedHours}
+          prevDayMissing={prevDayMissing}
+          onGoToPreviousDay={goToPreviousDay}
+          selectedDate={selectedDate}
         />
-      </motion.div >
+      </motion.div>
 
       {/* Error Modal for "Another unit in progress" - Simple guaranteed modal */}
       {

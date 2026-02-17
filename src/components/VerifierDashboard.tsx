@@ -162,6 +162,26 @@ export function VerifierDashboard({ user, isDarkMode = false, defaultTab = 'appr
     }
   };
 
+  const handleUnitClick = (teacherId: string) => {
+    if (!teacherId) return;
+
+    // Find the element
+    const element = document.getElementById(`teacher-group-${teacherId}`);
+
+    if (element) {
+      // Expand if collapsed
+      if (!expandedTeachers.has(teacherId)) {
+        toggleTeacherGroup(teacherId);
+      }
+
+      // Scroll into view
+      setTimeout(() => {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Optional: Highlight effect could be added here
+      }, 100);
+    }
+  };
+
   const getTypeLabel = (type: string) => {
     switch (type) {
       case 'unit-complete': return 'Unit Completion';
@@ -198,16 +218,20 @@ export function VerifierDashboard({ user, isDarkMode = false, defaultTab = 'appr
         date: date
       };
     } else if (approval.type === 'unit-complete') {
+      const unitName = approval.requestData?.unitName;
+      const subjectName = approval.requestData?.subjectName;
       return {
-        title: `Complete Unit`,
-        action: `Mark unit as completed`,
-        date: ''
+        title: `Complete Unit: ${unitName || 'Unknown Unit'}`,
+        action: `Mark unit "${unitName || 'Unknown'}" as completed ${subjectName ? `(${subjectName})` : ''}`,
+        date: new Date(approval.createdAt).toLocaleDateString() + ' ' + new Date(approval.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
     } else if (approval.type === 'unit-start') {
+      const unitName = approval.requestData?.unitName;
+      const subjectName = approval.requestData?.subjectName;
       return {
-        title: `Start Unit`,
-        action: `Begin working on unit`,
-        date: ''
+        title: `Start Unit: ${unitName || 'Unknown Unit'}`,
+        action: `Start working on "${unitName || 'Unknown'}" ${subjectName ? `(${subjectName})` : ''}`,
+        date: new Date(approval.createdAt).toLocaleDateString() + ' ' + new Date(approval.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
     } else if (approval.type === 'subject-assign') {
       return {
@@ -217,10 +241,11 @@ export function VerifierDashboard({ user, isDarkMode = false, defaultTab = 'appr
       };
     } else if (approval.type === 'break-timing') {
       const duration = approval.requestData?.breakDuration;
+      const date = approval.requestData?.date ? new Date(approval.requestData.date).toLocaleDateString() : 'Today';
       return {
         title: `Break Timing`,
         action: duration ? `Set break to ${duration} minutes` : 'Remove break',
-        date: ''
+        date: date
       };
     }
     return { title: getTypeLabel(approval.type), action: '', date: '' };
@@ -575,6 +600,8 @@ export function VerifierDashboard({ user, isDarkMode = false, defaultTab = 'appr
                   <option value="all">All</option>
                   <option value="time-slot">Time Slot</option>
                   <option value="break-timing">Break Timing</option>
+                  <option value="unit-start">Start Unit</option>
+                  <option value="unit-complete">Complete Unit</option>
                   <option value="subject-assign">Subject Assignment</option>
                 </select>
               </div>
@@ -622,7 +649,7 @@ export function VerifierDashboard({ user, isDarkMode = false, defaultTab = 'appr
                   <>
                     {/* Render Grouped Approvals as Accordions */}
                     {Object.entries(groups).map(([teacherId, group]) => (
-                      <div key={teacherId} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                      <div key={teacherId} id={`teacher-group-${teacherId}`} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
                         <button
                           onClick={() => toggleTeacherGroup(teacherId)}
                           className="w-full flex items-center justify-between p-4 bg-gray-50/50 dark:bg-slate-800/50 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
@@ -696,7 +723,7 @@ export function VerifierDashboard({ user, isDarkMode = false, defaultTab = 'appr
                                         {approval.type === 'break-timing' ? 'Break' : 'Slot'}
                                       </span>
                                       <span className="text-xs text-gray-400 font-medium">
-                                        {new Date(approval.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        {formatRequestDetails(approval).date} • {new Date(approval.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                       </span>
                                     </div>
 
@@ -874,6 +901,53 @@ export function VerifierDashboard({ user, isDarkMode = false, defaultTab = 'appr
               })()
             )}
           </div>
+
+          {/* Active Units (In Progress) Section - Shows started units */}
+          {(data?.inProgressUnits?.length || 0) > 0 && (
+            <div className="mt-8 mb-4">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <Clock className="w-5 h-5 text-blue-500" />
+                Active Units (In Progress)
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {data!.inProgressUnits!.map((unit: any) => (
+                  <div
+                    key={unit.id}
+                    onClick={() => handleUnitClick(unit.teacherId)}
+                    className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-all cursor-pointer hover:border-blue-200 dark:hover:border-blue-800"
+                  >
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${unit.subjectColor || 'from-blue-500 to-indigo-600'} flex items-center justify-center text-white font-bold text-sm shadow-sm`}>
+                        {unit.subject?.substring(0, 1) || 'S'}
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-gray-900 dark:text-white text-sm line-clamp-1" title={unit.unit}>{unit.unit}</h4>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1" title={unit.subject}>{unit.subject}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500 dark:text-gray-400">Teacher</span>
+                        <span className="font-bold text-gray-900 dark:text-white truncate max-w-[120px]" title={unit.teacherName}>{unit.teacherName}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500 dark:text-gray-400">Started</span>
+                        <span className="font-medium text-gray-900 dark:text-white">
+                          {new Date(unit.startedAt).toLocaleDateString()} • {new Date(unit.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500 dark:text-gray-400">Duration</span>
+                        <span className="font-bold text-blue-600 dark:text-blue-400">
+                          {unit.totalHours ? Number(unit.totalHours).toFixed(1) : '0.0'} hrs
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )
       }

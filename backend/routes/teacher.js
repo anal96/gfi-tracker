@@ -304,9 +304,19 @@ router.get('/dashboard', async (req, res) => {
   try {
     const teacherId = req.user.role === 'teacher' ? req.user.id : req.query.teacherId || req.user.id;
 
-    // Get today's date at midnight
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Get dashboard date (default to today)
+    let dashboardDate = new Date();
+    if (req.query.date) {
+      dashboardDate = new Date(req.query.date);
+    }
+    dashboardDate.setHours(0, 0, 0, 0);
+
+    // Actual calendar today (for logical checks)
+    const calendarToday = new Date();
+    calendarToday.setHours(0, 0, 0, 0);
+
+    // Legacy 'today' variable for compatibility with existing code where it means "the date being viewed"
+    const today = dashboardDate;
 
     // Time slot definitions - must match the update route
     const slotDefinitions = {
@@ -398,8 +408,8 @@ router.get('/dashboard', async (req, res) => {
       const units = await Promise.all(subjectUnits.map(async (unit) => {
         // unit is already populated, so it's a full Unit document
         const log = unitLogs.find(
-          log => log.unit._id.toString() === unit._id.toString() &&
-          log.subject._id.toString() === subject._id.toString()
+          log => log.unit && log.unit._id.toString() === unit._id.toString() &&
+          log.subject && log.subject._id.toString() === subject._id.toString()
         );
 
         let status = 'not-started';
@@ -445,9 +455,41 @@ router.get('/dashboard', async (req, res) => {
       };
     }));
 
+    // Check for previous day's entry
+    // ONLY check if we are viewing Today's dashboard (to avoid blocking past edits)
+    let prevDayMissing = false;
+
+    if (today.getTime() === calendarToday.getTime()) {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        // ... (rest of logic remains same, but safer to re-state it)
+        
+        // Check if there is ANY history before yesterday (to avoid blocking new teachers on their first day)
+        const hasPriorHistory = await DailyTimeSlot.findOne({
+          teacher: teacherId,
+          date: { $lt: today } 
+        });
+
+        if (hasPriorHistory) {
+          const prevDaySlot = await DailyTimeSlot.findOne({
+            teacher: teacherId,
+            date: yesterday
+          });
+
+          if (!prevDaySlot || (prevDaySlot.totalHours === 0 && !prevDaySlot.breakDuration && !prevDaySlot.slots.some(s => s.checked))) {
+             // Only flag as missing if it's not a Sunday? 
+             if (yesterday.getDay() !== 0) { // Assuming 0 is Sunday
+                 prevDayMissing = true;
+             }
+          }
+        }
+    }
+
     res.json({
       success: true,
       data: {
+        prevDayMissing,
         timeSlots: timeSlots || {
           date: today,
           slots: [],
@@ -475,16 +517,24 @@ router.get('/dashboard', async (req, res) => {
 router.get('/time-slots/approval-status', async (req, res) => {
   try {
     const teacherId = req.user.id;
-    const today = new Date();
+    let today = new Date();
+    if (req.query.date) {
+      today = new Date(req.query.date);
+    }
     today.setHours(0, 0, 0, 0);
+
+    const queryDate = today.toISOString();
+    console.log(`🔍 DEBUG: Fetching approval status. Query Date: ${req.query.date} -> ${queryDate}, Teacher: ${teacherId}`);
 
     // Get all approvals for today's time slots
     const slotApprovals = await Approval.find({
       type: 'time-slot',
       requestedBy: teacherId,
-      'requestData.date': today.toISOString()
+      'requestData.date': queryDate
     })
       .sort({ createdAt: -1 });
+
+    console.log(`🔍 DEBUG: Found ${slotApprovals.length} slot approvals for date ${queryDate}`);
 
     // Get all approvals for today's break timing
     const breakApprovals = await Approval.find({
@@ -545,9 +595,9 @@ router.get('/time-slots/approval-status', async (req, res) => {
 router.post('/time-slots/break', async (req, res) => {
   try {
     const teacherId = req.user.role === 'teacher' ? req.user.id : req.body.teacherId || req.user.id;
-    let { breakDuration } = req.body;
+    let { breakDuration, date } = req.body;
 
-    console.log('📥 Break timing request received:', { breakDuration, teacherId, body: req.body });
+    console.log('📥 Break timing request received:', { breakDuration, teacherId, date, body: req.body });
 
     // Convert breakDuration to number if it's a string
     if (breakDuration !== null && breakDuration !== undefined && breakDuration !== '') {
@@ -561,13 +611,16 @@ router.post('/time-slots/break', async (req, res) => {
 
     console.log('📊 Processed breakDuration:', breakDuration);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    let targetDate = new Date();
+    if (date) {
+      targetDate = new Date(date);
+    }
+    targetDate.setHours(0, 0, 0, 0);
 
     // Ensure DailyTimeSlot record exists
     let currentTimeSlot = await DailyTimeSlot.findOne({
       teacher: teacherId,
-      date: today
+      date: targetDate
     });
 
     if (!currentTimeSlot) {
@@ -584,7 +637,7 @@ router.post('/time-slots/break', async (req, res) => {
 
       currentTimeSlot = await DailyTimeSlot.create({
         teacher: teacherId,
-        date: today,
+        date: targetDate,
         slots: Object.entries(slotDefinitions).map(([id, def]) => ({
           slotId: id,
           label: def.label,
@@ -613,7 +666,7 @@ router.post('/time-slots/break', async (req, res) => {
           type: 'break-timing',
           status: 'pending',
           requestedBy: teacherId,
-          'requestData.date': today.toISOString()
+          'requestData.date': targetDate.toISOString()
         },
         {
           status: 'rejected',
@@ -647,7 +700,7 @@ router.post('/time-slots/break', async (req, res) => {
       type: 'break-timing',
       status: 'pending',
       requestedBy: teacherId,
-      'requestData.date': today.toISOString(),
+      'requestData.date': targetDate.toISOString(),
       'requestData.breakDuration': breakDuration
     });
 
@@ -669,7 +722,7 @@ router.post('/time-slots/break', async (req, res) => {
       requestedBy: teacherId,
       requestData: {
         teacherId: teacherId,
-        date: today.toISOString(),
+        date: targetDate.toISOString(),
         breakDuration: breakDuration
       }
     });
@@ -699,15 +752,18 @@ router.post('/time-slots/break', async (req, res) => {
 router.post('/time-slots', async (req, res) => {
   try {
     const teacherId = req.user.role === 'teacher' ? req.user.id : req.body.teacherId || req.user.id;
-    const { slotId, checked, breakDuration } = req.body;
+    const { slotId, checked, breakDuration, date } = req.body;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    let targetDate = new Date();
+    if (date) {
+      targetDate = new Date(date);
+    }
+    targetDate.setHours(0, 0, 0, 0);
 
     // Check the CURRENT state of the slot in the database
     let currentTimeSlot = await DailyTimeSlot.findOne({
       teacher: teacherId,
-      date: today
+      date: targetDate
     });
 
     // Ensure DailyTimeSlot record exists
@@ -725,7 +781,7 @@ router.post('/time-slots', async (req, res) => {
 
       currentTimeSlot = await DailyTimeSlot.create({
         teacher: teacherId,
-        date: today,
+        date: targetDate,
         slots: Object.entries(slotDefinitions).map(([id, def]) => ({
           slotId: id,
           label: def.label,
@@ -809,7 +865,7 @@ router.post('/time-slots', async (req, res) => {
           status: 'pending',
           requestedBy: teacherId,
           'requestData.slotId': slotId,
-          'requestData.date': today.toISOString()
+          'requestData.date': targetDate.toISOString()
         },
         {
           status: 'rejected',
@@ -839,7 +895,7 @@ router.post('/time-slots', async (req, res) => {
       status: 'pending',
       requestedBy: teacherId,
       'requestData.slotId': slotId,
-      'requestData.date': today.toISOString(),
+      'requestData.date': targetDate.toISOString(),
       'requestData.checked': true
     });
 
@@ -861,7 +917,7 @@ router.post('/time-slots', async (req, res) => {
       status: 'pending',
       requestedBy: teacherId,
       'requestData.slotId': slotId,
-      'requestData.date': today.toISOString(),
+      'requestData.date': targetDate.toISOString(),
       'requestData.checked': false
     });
 
@@ -887,7 +943,7 @@ router.post('/time-slots', async (req, res) => {
       requestedBy: teacherId,
       requestData: {
         teacherId: teacherId,
-        date: today.toISOString(),
+        date: targetDate.toISOString(),
         slotId: slotId,
         checked: true
       }
@@ -978,42 +1034,52 @@ router.post('/units/:unitId/start', async (req, res) => {
     }
 
     // Check if unit log already exists
-    const existingLog = await UnitLog.findOne({
+    let unitLog = await UnitLog.findOne({
       unit: unitId,
       teacher: teacherId
     });
 
-    if (existingLog) {
-      if (existingLog.status === 'in-progress') {
+    if (unitLog) {
+      if (unitLog.status === 'in-progress') {
         return res.status(400).json({
           success: false,
           message: 'This unit is already in progress'
         });
       }
-      // If log exists but is completed, update it to in-progress
-      existingLog.status = 'in-progress';
-      existingLog.startTime = new Date();
-      existingLog.endTime = null;
-      existingLog.totalMinutes = 0;
-      await existingLog.save();
       
-      return res.json({
-        success: true,
-        message: 'Unit started successfully',
-        data: {
-          unitLogId: existingLog._id,
-          status: 'in-progress'
-        }
+      // Restart unit
+      unitLog.status = 'in-progress';
+      unitLog.startTime = new Date();
+      unitLog.endTime = null;
+      unitLog.totalMinutes = 0;
+      await unitLog.save();
+    } else {
+      // Create new unit log
+      unitLog = await UnitLog.create({
+        unit: unitId,
+        teacher: teacherId,
+        subject: subject._id,
+        startTime: new Date(),
+        status: 'in-progress',
+        endTime: null,
+        totalMinutes: 0
       });
     }
 
-    // Create unit log directly (no approval needed)
-    const unitLog = await UnitLog.create({
-      unit: unitId,
-      teacher: teacherId,
-      subject: subject._id,
-      startTime: new Date(),
-      status: 'in-progress'
+    // Notification: Create an 'approved' record immediately
+    await Approval.create({
+      type: 'unit-start',
+      status: 'approved',
+      requestedBy: teacherId,
+      approvedBy: teacherId, // Auto-approved
+      approvedAt: new Date(),
+      requestData: {
+        teacherId: teacherId,
+        unitId: unitId,
+        subjectId: subject._id,
+        unitName: unit.name,
+        subjectName: subject.name
+      }
     });
 
     res.json({
@@ -1026,29 +1092,9 @@ router.post('/units/:unitId/start', async (req, res) => {
     });
   } catch (error) {
     console.error('Error starting unit:', error);
-    console.error('Error code:', error.code);
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
-    
-    // Handle specific MongoDB duplicate key errors
-    if (error.code === 11000 || error.name === 'MongoServerError' || (error.message && error.message.includes('duplicate key'))) {
-      const errorMessage = error.message || '';
-      if (errorMessage.includes('unitId') || errorMessage.includes('teacherId')) {
-        return res.status(500).json({
-          success: false,
-          message: 'Database index error detected. Please run the fix script: cd backend && node scripts/fix-unitlog-index.js. Then restart the backend.'
-        });
-      }
-      // Generic duplicate key error - might be a race condition, try to find existing log
-      return res.status(409).json({
-        success: false,
-        message: 'A unit log already exists for this unit. Please refresh the page and try again.'
-      });
-    }
-    
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to start unit. Please try again.'
+      message: error.message || 'Failed to submit unit start request'
     });
   }
 });
@@ -1065,7 +1111,7 @@ router.post('/units/:unitId/complete', async (req, res) => {
     const unitLog = await UnitLog.findOne({
       unit: unitId,
       teacher: teacherId
-    }).populate('unit');
+    }).populate('unit').populate('subject');
 
     if (!unitLog) {
       return res.status(404).json({
@@ -1081,17 +1127,26 @@ router.post('/units/:unitId/complete', async (req, res) => {
       });
     }
 
-    if (unitLog.status !== 'in-progress') {
-      return res.status(400).json({
-        success: false,
-        message: 'Unit must be in progress to complete'
-      });
-    }
-
-    // Complete the unit directly (no approval needed)
-    unitLog.endTime = new Date();
+    // Complete the unit immediately
     unitLog.status = 'completed';
+    unitLog.endTime = new Date();
+    // totalMinutes will be calculated by pre-save hook
     await unitLog.save();
+
+    // Create notification record for verifier
+    await Approval.create({
+      type: 'unit-complete',
+      status: 'approved',
+      requestedBy: teacherId,
+      approvedBy: teacherId, // Auto-approved
+      approvedAt: new Date(),
+      requestData: {
+        teacherId: teacherId,
+        unitLogId: unitLog._id,
+        unitName: unitLog.unit?.name || 'Unknown Unit',
+        subjectName: unitLog.subject?.name || 'Unknown Subject'
+      }
+    });
 
     res.json({
       success: true,
@@ -1102,9 +1157,10 @@ router.post('/units/:unitId/complete', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Error completing unit:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message || 'Failed to submit unit completion request'
     });
   }
 });

@@ -20,6 +20,9 @@ interface TimeSlotSelectorProps {
   onSave?: (slots: string[], breakDuration?: number | null) => Promise<void>;
   breakDuration?: number | null;
   approvedHours?: number;
+  prevDayMissing?: boolean;
+  onGoToPreviousDay?: () => void;
+  selectedDate?: Date;
 }
 
 interface SlotApprovalStatus {
@@ -29,9 +32,10 @@ interface SlotApprovalStatus {
   approvedAt?: string;
   rejectedAt?: string;
   rejectionReason?: string;
+  requestData?: any;
 }
 
-export function TimeSlotSelector({ selectedSlots, onSelectionChange, onSave, breakDuration: initialBreakDuration, approvedHours }: TimeSlotSelectorProps) {
+export function TimeSlotSelector({ selectedSlots, onSelectionChange, onSave, breakDuration: initialBreakDuration, approvedHours, prevDayMissing, onGoToPreviousDay, selectedDate }: TimeSlotSelectorProps) {
   // Start LOCKED by default - slots cannot be edited until Edit button is clicked
   // If there are selected slots, they're locked (saved). If empty, still start locked.
   const [isLocked, setIsLocked] = useState(true);
@@ -53,7 +57,7 @@ export function TimeSlotSelector({ selectedSlots, onSelectionChange, onSave, bre
     // Poll for approval status updates every 5 seconds
     const interval = setInterval(loadApprovalStatus, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedDate]); // Reload when date changes
 
   // Initialize break duration from approval status if approved
   useEffect(() => {
@@ -67,7 +71,7 @@ export function TimeSlotSelector({ selectedSlots, onSelectionChange, onSave, bre
 
   const loadApprovalStatus = async () => {
     try {
-      const response = await api.getTimeSlotApprovalStatus();
+      const response = await api.getTimeSlotApprovalStatus(selectedDate);
       if (response && response.success) {
         const newStatus = response.data;
         const oldStatus = approvalStatus;
@@ -273,7 +277,7 @@ export function TimeSlotSelector({ selectedSlots, onSelectionChange, onSave, bre
       if (breakDurationToSave !== initialBreakDuration) {
         try {
           console.log('📤 Saving break timing:', breakDurationToSave);
-          await api.updateBreakTiming(breakDurationToSave);
+          await api.updateBreakTiming(breakDurationToSave, selectedDate);
           console.log('✅ Break timing saved successfully');
           // Update the actual break duration after successful save
           setBreakDuration(breakDurationToSave);
@@ -392,6 +396,28 @@ export function TimeSlotSelector({ selectedSlots, onSelectionChange, onSave, bre
 
   return (
     <div className="relative overflow-hidden bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 border border-blue-100 dark:border-blue-700/50 shadow-xl shadow-blue-500/10 card-hover">
+      {prevDayMissing && (
+        <div className="absolute inset-0 z-50 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm flex items-center justify-center p-6 text-center">
+          <div className="max-w-md w-full bg-white dark:bg-slate-900 border-2 border-red-500 rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-300">
+            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-8 h-8 text-red-600 dark:text-red-400" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+              Action Required
+            </h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-6 font-medium">
+              Previous work day log is pending! <br />
+              <span className="text-sm opacity-80 mt-1 block font-normal">Please complete yesterday's time log to unlock today's schedule.</span>
+            </p>
+            <button
+              onClick={onGoToPreviousDay ? onGoToPreviousDay : () => window.location.reload()}
+              className="px-6 py-2.5 rounded-xl bg-red-500 dark:bg-red-600 text-white font-semibold hover:bg-red-600 dark:hover:bg-red-700 transition-colors shadow-lg shadow-red-500/20"
+            >
+              {onGoToPreviousDay ? 'Fill Previous Day' : 'Check Again'}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="relative z-10">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
@@ -608,39 +634,68 @@ export function TimeSlotSelector({ selectedSlots, onSelectionChange, onSave, bre
             <label className="text-sm font-medium text-black dark:text-white whitespace-nowrap">
               Break Duration:
             </label>
-            <select
-              value={!isLocked
-                ? (tempBreakDuration || '')
-                : breakApprovalStatus?.status === 'pending' && breakApprovalStatus.requestData?.breakDuration
-                  ? breakApprovalStatus.requestData.breakDuration
-                  : breakDuration || ''}
-              onChange={(e) => {
-                const newValue = e.target.value === '' ? null : (e.target.value ? parseInt(e.target.value, 10) : null);
-                console.log('🔄 Break duration changed:', newValue, 'isLocked:', isLocked);
-                if (!isLocked) {
-                  setTempBreakDuration(newValue);
-                  console.log('✅ Updated tempBreakDuration to:', newValue);
-                } else {
-                  setBreakDuration(newValue);
-                }
-              }}
-              disabled={isLocked}
-              className={`px-4 py-2 border-2 rounded-lg bg-white dark:bg-slate-700 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[150px] transition-all ${isLocked ? 'opacity-50 cursor-not-allowed' : ''
-                } ${breakApprovalStatus?.status === 'pending'
-                  ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20'
-                  : breakApprovalStatus?.status === 'approved' && breakDuration
-                    ? 'border-green-400'
-                    : breakApprovalStatus?.status === 'rejected'
-                      ? 'border-red-400'
-                      : ''
-                }`}
-            >
-              <option value="">No Break</option>
-              <option value="15">15 minutes{breakApprovalStatus?.status === 'pending' && breakApprovalStatus.requestData?.breakDuration === 15 ? ' ⏳ (Pending)' : ''}</option>
-              <option value="30">30 minutes{breakApprovalStatus?.status === 'pending' && breakApprovalStatus.requestData?.breakDuration === 30 ? ' ⏳ (Pending)' : ''}</option>
-              <option value="45">45 minutes{breakApprovalStatus?.status === 'pending' && breakApprovalStatus.requestData?.breakDuration === 45 ? ' ⏳ (Pending)' : ''}</option>
-              <option value="60">60 minutes (1 hour){breakApprovalStatus?.status === 'pending' && breakApprovalStatus.requestData?.breakDuration === 60 ? ' ⏳ (Pending)' : ''}</option>
-            </select>
+            <div className="flex flex-col gap-2 flex-grow max-w-sm">
+              <div className="flex items-center gap-3 w-full">
+                {/* Slider for quick selection */}
+                <div className="relative flex-grow h-6 flex items-center">
+                  <input
+                    type="range"
+                    min="0"
+                    max="120"
+                    step="5"
+                    value={!isLocked
+                      ? (tempBreakDuration || 0)
+                      : breakApprovalStatus?.status === 'pending' && breakApprovalStatus.requestData?.breakDuration
+                        ? breakApprovalStatus.requestData.breakDuration
+                        : breakDuration || 0}
+                    onChange={(e) => {
+                      if (!isLocked) {
+                        setTempBreakDuration(parseInt(e.target.value, 10) || null);
+                      }
+                    }}
+                    disabled={isLocked}
+                    className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${isLocked
+                      ? 'bg-gray-200 dark:bg-gray-700'
+                      : 'bg-blue-100 dark:bg-blue-900/30 accent-blue-600'
+                      }`}
+                  />
+                </div>
+
+                {/* Number Input for precise entry */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <input
+                    type="number"
+                    min="0"
+                    max="300"
+                    value={!isLocked
+                      ? (tempBreakDuration !== null ? tempBreakDuration : '')
+                      : breakApprovalStatus?.status === 'pending' && breakApprovalStatus.requestData?.breakDuration
+                        ? breakApprovalStatus.requestData.breakDuration
+                        : (breakDuration !== null ? breakDuration : '')}
+                    onChange={(e) => {
+                      if (!isLocked) {
+                        const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
+                        setTempBreakDuration(val);
+                      }
+                    }}
+                    disabled={isLocked}
+                    placeholder="0"
+                    className={`w-16 px-2 py-1.5 text-center text-sm font-semibold border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${isLocked
+                      ? 'bg-gray-100 dark:bg-slate-800 text-gray-500 border-gray-200 dark:border-slate-700 opacity-70 cursor-not-allowed'
+                      : 'bg-white dark:bg-slate-700 text-black dark:text-white border-blue-200 dark:border-slate-600 hover:border-blue-300'
+                      } ${breakApprovalStatus?.status === 'pending'
+                        ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10'
+                        : breakApprovalStatus?.status === 'approved' && breakDuration
+                          ? 'border-green-400'
+                          : breakApprovalStatus?.status === 'rejected'
+                            ? 'border-red-400'
+                            : ''
+                      }`}
+                  />
+                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">min</span>
+                </div>
+              </div>
+            </div>
             {(() => {
               const displayBreakDuration = !isLocked
                 ? tempBreakDuration

@@ -10,6 +10,7 @@ interface ActiveUnitCardProps {
     elapsedTime?: number;
     subjectName: string;
     subjectColor: string;
+    batchName?: string;
   };
 }
 
@@ -86,8 +87,13 @@ export function ActiveUnitCard({ unit }: ActiveUnitCardProps) {
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs sm:text-sm text-gray-500 dark:text-slate-400 mb-1 font-medium">
-                    Subject: <span className="font-bold text-black dark:text-white">{unit.subjectName}</span>
+                  <p className="text-xs sm:text-sm text-gray-500 dark:text-slate-400 mb-1 font-medium flex gap-2">
+                    <span>Subject: <span className="font-bold text-black dark:text-white">{unit.subjectName}</span></span>
+                    {unit.batchName && (
+                      <span className="text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-900/20 px-1.5 rounded text-[10px] self-center border border-blue-100 dark:border-blue-800">
+                        {unit.batchName}
+                      </span>
+                    )}
                   </p>
                   <h4 className="font-bold text-black dark:text-white text-sm sm:text-base leading-tight line-clamp-2">
                     {unit.name}

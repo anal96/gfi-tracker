@@ -129,6 +129,16 @@ export default defineConfig({
   build: {
     target: 'esnext',
     outDir: 'build',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          'ui-vendor': ['framer-motion', 'lucide-react', 'clsx', 'tailwind-merge'],
+          'chart-vendor': ['recharts'],
+          'utils-vendor': ['date-fns', 'xlsx'],
+        }
+      }
+    }
   },
   server: {
     port: 3000,

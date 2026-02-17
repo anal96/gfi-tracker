@@ -1,20 +1,28 @@
-import { useState, useEffect } from 'react';
-import { TeacherDashboard } from './components/TeacherDashboard';
-import { AdminDashboard } from './components/AdminDashboard';
-import { VerifierDashboard } from './components/VerifierDashboard';
-import { Login } from './components/Login';
-import { BottomNavigation } from './components/BottomNavigation';
-import { Profile } from './components/Profile';
-import { StudyDashboard } from './components/StudyDashboard';
-import { AnalyticsDashboard } from './components/AnalyticsDashboard';
-import { ExamPage } from './components/ExamPage';
-import { AssignPage } from './components/AssignPage';
-import { UserManagement } from './components/UserManagement';
-import { NotificationsPage } from './components/NotificationsPage';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Moon, Sun, Users, BookOpen, Download, X, LogOut, User, Share, PlusSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import api from './services/api';
 import { DashboardProvider } from './context/DashboardContext';
+
+// Lazy load components for performance
+const TeacherDashboard = lazy(() => import('./components/TeacherDashboard').then(module => ({ default: module.TeacherDashboard })));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(module => ({ default: module.AdminDashboard })));
+const VerifierDashboard = lazy(() => import('./components/VerifierDashboard').then(module => ({ default: module.VerifierDashboard })));
+const Login = lazy(() => import('./components/Login').then(module => ({ default: module.Login })));
+const BottomNavigation = lazy(() => import('./components/BottomNavigation').then(module => ({ default: module.BottomNavigation })));
+const Profile = lazy(() => import('./components/Profile').then(module => ({ default: module.Profile })));
+const StudyDashboard = lazy(() => import('./components/StudyDashboard').then(module => ({ default: module.StudyDashboard })));
+const AnalyticsDashboard = lazy(() => import('./components/AnalyticsDashboard').then(module => ({ default: module.AnalyticsDashboard })));
+const ExamPage = lazy(() => import('./components/ExamPage').then(module => ({ default: module.ExamPage })));
+const AssignPage = lazy(() => import('./components/AssignPage').then(module => ({ default: module.AssignPage })));
+const UserManagement = lazy(() => import('./components/UserManagement').then(module => ({ default: module.UserManagement })));
+const NotificationsPage = lazy(() => import('./components/NotificationsPage').then(module => ({ default: module.NotificationsPage })));
+
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center p-8">
+    <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+  </div>
+);
 
 export default function App() {
   // Initialize dark mode from localStorage or system preference
@@ -507,100 +515,106 @@ export default function App() {
 
       {/* Main Content - Mobile App Style (No Top Nav) */}
       {!user ? (
-        <Login
-          onLoginSuccess={handleLoginSuccess}
-          installPrompt={deferredPrompt}
-          onInstallClick={handleInstallClick}
-          showInstallOption={
-            typeof window !== 'undefined' &&
-            !(window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true || document.referrer.includes('android-app://'))
-          }
-        />
+        <Suspense fallback={<LoadingSpinner />}>
+          <Login
+            onLoginSuccess={handleLoginSuccess}
+            installPrompt={deferredPrompt}
+            onInstallClick={handleInstallClick}
+            showInstallOption={
+              typeof window !== 'undefined' &&
+              !(window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true || document.referrer.includes('android-app://'))
+            }
+          />
+        </Suspense>
       ) : (
         <DashboardProvider user={user}>
           <main className="pt-2 pb-24 sm:pb-28 min-h-screen relative z-10">
-            {view === 'teacher' && !isVerifier ? (
-              <TeacherDashboard user={user} isDarkMode={isDarkMode} onNavigate={(page) => setView(page as any)} />
-            ) : view === 'admin' && isAdmin ? (
-              <AdminDashboard
-                user={user}
-                isDarkMode={isDarkMode}
-                onNavigate={(page) => setView(page as any)}
-              />
-            ) : view === 'verifier' && (isVerifier || isAdmin) ? (
-              <VerifierDashboard user={user} isDarkMode={isDarkMode} showApprovalsContent={false} isHomePage={true} onNavigate={(page) => setView(page as any)} />
-            ) : view === 'subjects' ? (
-              isVerifier ? (
-                <VerifierDashboard user={user} isDarkMode={isDarkMode} defaultTab="approvals" showApprovalsContent={true} onNavigate={(page) => setView(page as any)} />
-              ) : isAdmin ? (
-                <AnalyticsDashboard user={user} isDarkMode={isDarkMode} />
-              ) : (
-                <StudyDashboard user={user} isDarkMode={isDarkMode} />
-              )
-            ) : view === 'schedule' ? (
-              isVerifier ? (
-                <VerifierDashboard user={user} isDarkMode={isDarkMode} defaultTab="assign" showApprovalsContent={false} isHomePage={false} onNavigate={(page) => setView(page as any)} />
-              ) : isAdmin ? (
-                <UserManagement user={user} isDarkMode={isDarkMode} />
-              ) : (
-                <AssignPage user={user} isDarkMode={isDarkMode} />
-              )
-            ) : view === 'progress' ? (
-              <Profile
-                user={user}
-                onLogout={handleLogout}
-                onToggleDarkMode={() => {
-                  console.log('Dark mode toggle clicked, current:', isDarkMode);
-                  const newValue = !isDarkMode;
-                  console.log('Setting dark mode to:', newValue);
-                  setIsDarkMode(newValue);
-                }}
-                isDarkMode={isDarkMode}
-                onInstallApp={handleInstallClick}
-                hasNativeInstallPrompt={!!deferredPrompt}
-                showInstallOption={
-                  typeof window !== 'undefined' &&
-                  !(window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true || document.referrer.includes('android-app://'))
-                }
-              />
-            ) : view === 'team' ? (
-              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
-                <div className="relative overflow-hidden backdrop-blur-xl bg-transparent dark:bg-blue-900/90 rounded-2xl md:rounded-3xl p-6 md:p-8 border border-blue-200 dark:border-blue-700 shadow-xl shadow-blue-500/10">
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-400/20 to-blue-500/20 rounded-full blur-2xl -z-0" />
-                  <div className="relative z-10">
-                    <h2 className="text-2xl md:text-3xl font-bold text-black mb-6">Team</h2>
-                    <p className="text-black">Team collaboration features coming soon.</p>
+            <Suspense fallback={<div className="h-screen flex items-center justify-center"><LoadingSpinner /></div>}>
+              {view === 'teacher' && !isVerifier ? (
+                <TeacherDashboard user={user} isDarkMode={isDarkMode} onNavigate={(page) => setView(page as any)} />
+              ) : view === 'admin' && isAdmin ? (
+                <AdminDashboard
+                  user={user}
+                  isDarkMode={isDarkMode}
+                  onNavigate={(page) => setView(page as any)}
+                />
+              ) : view === 'verifier' && (isVerifier || isAdmin) ? (
+                <VerifierDashboard user={user} isDarkMode={isDarkMode} showApprovalsContent={false} isHomePage={true} onNavigate={(page) => setView(page as any)} />
+              ) : view === 'subjects' ? (
+                isVerifier ? (
+                  <VerifierDashboard user={user} isDarkMode={isDarkMode} defaultTab="approvals" showApprovalsContent={true} onNavigate={(page) => setView(page as any)} />
+                ) : isAdmin ? (
+                  <AnalyticsDashboard user={user} isDarkMode={isDarkMode} />
+                ) : (
+                  <StudyDashboard user={user} isDarkMode={isDarkMode} />
+                )
+              ) : view === 'schedule' ? (
+                isVerifier ? (
+                  <VerifierDashboard user={user} isDarkMode={isDarkMode} defaultTab="assign" showApprovalsContent={false} isHomePage={false} onNavigate={(page) => setView(page as any)} />
+                ) : isAdmin ? (
+                  <UserManagement user={user} isDarkMode={isDarkMode} />
+                ) : (
+                  <AssignPage user={user} isDarkMode={isDarkMode} />
+                )
+              ) : view === 'progress' ? (
+                <Profile
+                  user={user}
+                  onLogout={handleLogout}
+                  onToggleDarkMode={() => {
+                    console.log('Dark mode toggle clicked, current:', isDarkMode);
+                    const newValue = !isDarkMode;
+                    console.log('Setting dark mode to:', newValue);
+                    setIsDarkMode(newValue);
+                  }}
+                  isDarkMode={isDarkMode}
+                  onInstallApp={handleInstallClick}
+                  hasNativeInstallPrompt={!!deferredPrompt}
+                  showInstallOption={
+                    typeof window !== 'undefined' &&
+                    !(window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true || document.referrer.includes('android-app://'))
+                  }
+                />
+              ) : view === 'team' ? (
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
+                  <div className="relative overflow-hidden backdrop-blur-xl bg-transparent dark:bg-blue-900/90 rounded-2xl md:rounded-3xl p-6 md:p-8 border border-blue-200 dark:border-blue-700 shadow-xl shadow-blue-500/10">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-400/20 to-blue-500/20 rounded-full blur-2xl -z-0" />
+                    <div className="relative z-10">
+                      <h2 className="text-2xl md:text-3xl font-bold text-black mb-6">Team</h2>
+                      <p className="text-black">Team collaboration features coming soon.</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : view === 'notifications' ? (
-              <NotificationsPage
-                user={user}
-                onBack={() => setView(isAdmin ? 'admin' : isVerifier ? 'verifier' : 'teacher')}
-                isDarkMode={isDarkMode}
-              />
-            ) : view === 'exam' ? (
-              <ExamPage
-                user={user}
-                isDarkMode={isDarkMode}
-                onBack={() => setView(isAdmin ? 'admin' : isVerifier ? 'verifier' : 'teacher')} // Go back to dashboard
-              />
-            ) : isVerifier ? (
-              // Fallback for verifiers - show verifier dashboard
-              <VerifierDashboard user={user} isDarkMode={isDarkMode} showApprovalsContent={false} isHomePage={true} onNavigate={(page) => setView(page as any)} />
-            ) : (
-              // Fallback for teachers/admins - show teacher dashboard
-              <TeacherDashboard user={user} isDarkMode={isDarkMode} onNavigate={(page) => setView(page as any)} />
-            )}
+              ) : view === 'notifications' ? (
+                <NotificationsPage
+                  user={user}
+                  onBack={() => setView(isAdmin ? 'admin' : isVerifier ? 'verifier' : 'teacher')}
+                  isDarkMode={isDarkMode}
+                />
+              ) : view === 'exam' ? (
+                <ExamPage
+                  user={user}
+                  isDarkMode={isDarkMode}
+                  onBack={() => setView(isAdmin ? 'admin' : isVerifier ? 'verifier' : 'teacher')} // Go back to dashboard
+                />
+              ) : isVerifier ? (
+                // Fallback for verifiers - show verifier dashboard
+                <VerifierDashboard user={user} isDarkMode={isDarkMode} showApprovalsContent={false} isHomePage={true} onNavigate={(page) => setView(page as any)} />
+              ) : (
+                // Fallback for teachers/admins - show teacher dashboard
+                <TeacherDashboard user={user} isDarkMode={isDarkMode} onNavigate={(page) => setView(page as any)} />
+              )}
+            </Suspense>
           </main>
 
           {/* Bottom Navigation - Mobile App Style */}
           {user && (
-            <BottomNavigation
-              currentView={view as any}
-              onViewChange={setView}
-              user={user}
-            />
+            <Suspense fallback={null}>
+              <BottomNavigation
+                currentView={view as any}
+                onViewChange={setView}
+                user={user}
+              />
+            </Suspense>
           )}
         </DashboardProvider>
       )}

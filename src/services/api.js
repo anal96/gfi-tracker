@@ -327,6 +327,16 @@ class ApiService {
         method: 'POST',
       });
       // Session cookie is cleared by backend
+      
+      // Clear all API cache to prevent data leak between users
+      if (typeof window !== 'undefined') {
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('api_cache_')) {
+            localStorage.removeItem(key);
+          }
+        });
+      }
+
       return data;
     } catch (error) {
       console.error('Logout error:', error);
@@ -335,16 +345,20 @@ class ApiService {
   }
 
   // Teacher endpoints
-  async getTeacherDashboard(batchId = null) {
-    const params = batchId && batchId !== 'all' ? `?batchId=${batchId}` : '';
-    return this.request(`/teacher/dashboard${params}`, { cacheMaxAge: 0 });
+  async getTeacherDashboard(batchId = null, date = null) {
+    const params = new URLSearchParams();
+    if (batchId && batchId !== 'all') params.append('batchId', batchId);
+    if (date) params.append('date', date instanceof Date ? date.toISOString() : date);
+
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/teacher/dashboard${queryString}`, { cacheMaxAge: 0 });
   }
 
-  async updateTimeSlot(slotId, checked, breakDuration = null) {
+  async updateTimeSlot(slotId, checked, breakDuration = null, date = null) {
     try {
       const response = await this.request('/teacher/time-slots', {
         method: 'POST',
-        body: JSON.stringify({ slotId, checked, breakDuration }),
+        body: JSON.stringify({ slotId, checked, breakDuration, date }),
       });
       return response;
     } catch (error) {
@@ -360,11 +374,11 @@ class ApiService {
     }
   }
 
-  async updateBreakTiming(breakDuration) {
+  async updateBreakTiming(breakDuration, date = null) {
     try {
       const response = await this.request('/teacher/time-slots/break', {
         method: 'POST',
-        body: JSON.stringify({ breakDuration }),
+        body: JSON.stringify({ breakDuration, date }),
       });
       return response;
     } catch (error) {
@@ -421,8 +435,12 @@ class ApiService {
     });
   }
 
-  async getTimeSlotApprovalStatus() {
-    return this.request('/teacher/time-slots/approval-status', { cacheMaxAge: 0 });
+  async getTimeSlotApprovalStatus(date = null) {
+    const params = new URLSearchParams();
+    if (date) params.append('date', date instanceof Date ? date.toISOString() : date);
+    params.append('_t', Date.now()); // Prevent caching
+    
+    return this.request(`/teacher/time-slots/approval-status?${params.toString()}`, { cacheMaxAge: 0 });
   }
 
   async cancelApprovalRequest(approvalId) {
@@ -618,6 +636,16 @@ class ApiService {
     return this.request('/verifier/exam/toggle', {
       method: 'POST',
       body: JSON.stringify({ unitId, isFinished })
+    });
+  }
+
+  async getTimeTableHistory() {
+    return this.request('/verifier/time-table/history');
+  }
+
+  async deleteTimeTableHistory(id) {
+    return this.request(`/verifier/time-table/history/${id}`, {
+      method: 'DELETE'
     });
   }
 
